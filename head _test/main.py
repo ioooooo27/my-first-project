@@ -170,8 +170,8 @@ def LaneLine_process(image):
 # ==========================================
 
 if __name__ == '__main__':
-    # 提示：运行前请确保工程目录下存在 test_videos 文件夹并有相应的视频素材
-    video_input_path = r"head _test/test_videos/challenge.mp4" 
+
+    video_input_path = r"head _test/test_videos/challenge.mp4"
     video_output_path = 'video_1_xlt.mp4'
 
     print(f"正在处理视频: {video_input_path} ...")
