@@ -117,28 +117,40 @@ def check_freshness(crop_bgr, save_name):
 def camera_work():
     global global_frame, cam_cap, cam_thread_flag, global_cam_results
     cam_cap = cv2.VideoCapture(0)
+    
+    # 帧过滤机制：跳帧以极大降低CPU开销，保持流画面流畅，无累积延迟
+    frame_count = 0
+    latest_res = None
+    
     while cam_thread_flag and cam_cap.isOpened():
         ret, frame = cam_cap.read()
         if not ret:
             break
-        res = model(frame, conf=0.42)
+            
+        frame_count += 1
+        # 每隔 3 帧做一次 YOLO 推理 (约 10 FPS)，其余帧复用上一帧的检测框
+        if latest_res is None or frame_count % 3 == 0:
+            latest_res = model(frame, conf=0.42)[0]
+            
         draw_img = frame.copy()
         current_counts = {}
-        for box in res[0].boxes:
-            x1,y1,x2,y2 = map(int,box.xyxy[0])
-            cls_idx = int(box.cls[0])
-            fname = res[0].names[cls_idx]
-            
-            # 统计数量
-            chinese_name = fruit_dict.get(fname, {}).get("name", fname)
-            current_counts[chinese_name] = current_counts.get(chinese_name, 0) + 1
-            
-            # 画红色矩形框
-            cv2.rectangle(draw_img,(x1,y1),(x2,y2),(0,0,255),2)
-            # 在图像上绘制英文类别和置信度标签
-            conf_val = float(box.conf[0])
-            label = f"{fname.capitalize()} {conf_val:.2f}"
-            cv2.putText(draw_img, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+        
+        if latest_res is not None:
+            for box in latest_res.boxes:
+                x1,y1,x2,y2 = map(int,box.xyxy[0])
+                cls_idx = int(box.cls[0])
+                fname = latest_res.names[cls_idx]
+                
+                # 统计数量
+                chinese_name = fruit_dict.get(fname, {}).get("name", fname)
+                current_counts[chinese_name] = current_counts.get(chinese_name, 0) + 1
+                
+                # 画红色矩形框
+                cv2.rectangle(draw_img,(x1,y1),(x2,y2),(0,0,255),2)
+                # 在图像上绘制英文类别和置信度标签
+                conf_val = float(box.conf[0])
+                label = f"{fname.capitalize()} {conf_val:.2f}"
+                cv2.putText(draw_img, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
             
         with frame_lock:
             global_frame = draw_img
