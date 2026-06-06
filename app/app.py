@@ -36,6 +36,8 @@ def get_password_hash(password, salt_hex):
 def get_freshness_from_cloud(image_path):
     gemini_key = os.environ.get("GEMINI_API_KEY")
     openai_key = os.environ.get("OPENAI_API_KEY")
+    openai_base = os.environ.get("OPENAI_API_BASE")
+    openai_model = os.environ.get("OPENAI_MODEL")
     
     # 支持从配置文件 config.json 中读取 API Key
     config_path = os.path.join(BASE_DIR, "config.json")
@@ -45,6 +47,8 @@ def get_freshness_from_cloud(image_path):
                 cfg = json.load(f)
                 gemini_key = gemini_key or cfg.get("GEMINI_API_KEY")
                 openai_key = openai_key or cfg.get("OPENAI_API_KEY")
+                openai_base = openai_base or cfg.get("OPENAI_API_BASE")
+                openai_model = openai_model or cfg.get("OPENAI_MODEL")
         except Exception:
             pass
 
@@ -62,15 +66,19 @@ def get_freshness_from_cloud(image_path):
             "注：score为0-100整数；level只能为'新鲜'、'一般'或'不新鲜'之一；edible只能为'可食用'或'不建议食用'之一。"
         )
 
-        # 优先使用 OpenAI GPT-4o-mini
+        # 优先使用 OpenAI 兼容接口（如 DeepSeek、OpenRouter 等）
         if openai_key:
-            url = "https://api.openai.com/v1/chat/completions"
+            base_url = openai_base or "https://api.openai.com/v1"
+            base_url = base_url.rstrip("/")
+            url = f"{base_url}/chat/completions"
+            model_name = openai_model or "gpt-4o-mini"
+            
             headers = {
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {openai_key}"
             }
             payload = {
-                "model": "gpt-4o-mini",
+                "model": model_name,
                 "messages": [
                     {
                         "role": "user",
@@ -88,7 +96,7 @@ def get_freshness_from_cloud(image_path):
                 "response_format": {"type": "json_object"},
                 "max_tokens": 150
             }
-            res = requests.post(url, json=payload, headers=headers, timeout=10)
+            res = requests.post(url, json=payload, headers=headers, timeout=15)
             if res.status_code == 200:
                 content = res.json()["choices"][0]["message"]["content"]
                 data = json.loads(content.strip())
@@ -96,8 +104,10 @@ def get_freshness_from_cloud(image_path):
                     "score": int(data.get("score", 70)),
                     "level": str(data.get("level", "新鲜")),
                     "edible": str(data.get("edible", "可食用")),
-                    "reason": str(data.get("reason", "通过 OpenAI 分析"))
+                    "reason": str(data.get("reason", f"通过 {model_name} 兼容接口分析"))
                 }
+            else:
+                print(f"OpenAI 兼容接口报错 (HTTP {res.status_code}): {res.text}")
 
         # 其次使用 Gemini 1.5 Flash
         if gemini_key:
@@ -121,7 +131,7 @@ def get_freshness_from_cloud(image_path):
                     "responseMimeType": "application/json"
                 }
             }
-            res = requests.post(url, json=payload, headers=headers, timeout=10)
+            res = requests.post(url, json=payload, headers=headers, timeout=15)
             if res.status_code == 200:
                 content = res.json()['candidates'][0]['content']['parts'][0]['text']
                 data = json.loads(content.strip())
@@ -129,7 +139,7 @@ def get_freshness_from_cloud(image_path):
                     "score": int(data.get("score", 70)),
                     "level": str(data.get("level", "新鲜")),
                     "edible": str(data.get("edible", "可食用")),
-                    "reason": str(data.get("reason", "通过 Gemini 分析"))
+                    "reason": str(data.get("reason", "通过 Gemini 实时分析"))
                 }
     except Exception as e:
         print(f"调用云端大模型 API 失败: {e}")
