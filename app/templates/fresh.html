@@ -2,45 +2,463 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>新鲜度判定参考样图库</title>
+    <title>水果新鲜度检测中心</title>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
     <style>
-        *{margin:0;padding:0;background:#f6fbf6;font-family:微软雅黑;}
-        .wrap{width:90%;max-width:1300px;margin:30px auto;}
-        h2{text-align:center;color:#297d3e;margin-bottom:30px;}
-        .box{display:grid;grid-template-columns:1fr 1fr;gap:30px;margin-bottom:40px;}
-        .card{background:#fff;padding:20px;border-radius:10px;border:1px solid #d7eed9;}
-        h3{color:#297d3e;margin-bottom:12px;}
-        p{line-height:1.7;color:#333;}
-        .img-box{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:15px 0;}
-        .img-box img{width:100%;border:1px solid #ddd;border-radius:6px;}
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+        body {
+            background: linear-gradient(135deg, #f3faf3 0%, #e8f5e8 100%);
+            min-height: 100vh;
+            color: #333;
+            padding: 40px 20px;
+        }
+        .wrap {
+            width: 100%;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h2 {
+            text-align: center;
+            color: #2e7d32;
+            margin-bottom: 30px;
+            font-size: 28px;
+            font-weight: 700;
+        }
+        
+        /* Interactive Detector Section */
+        .detector-section {
+            background: rgba(255, 255, 255, 0.9);
+            border: 2px dashed #81c784;
+            border-radius: 16px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
+            backdrop-filter: blur(10px);
+            margin-bottom: 40px;
+            display: flex;
+            gap: 40px;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: center;
+        }
+        .upload-area {
+            flex: 1;
+            min-width: 300px;
+            max-width: 500px;
+            text-align: center;
+        }
+        .preview-box {
+            width: 100%;
+            aspect-ratio: 4/3;
+            border: 2px dashed #a5d6a7;
+            border-radius: 12px;
+            background: #f9fbf9;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            cursor: pointer;
+            position: relative;
+            transition: all 0.3s ease;
+        }
+        .preview-box:hover {
+            border-color: #4caf50;
+            background: #f1f8e9;
+        }
+        .preview-box img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .upload-placeholder {
+            color: #666;
+            font-size: 15px;
+        }
+        .upload-placeholder i {
+            font-size: 40px;
+            color: #81c784;
+            display: block;
+            margin-bottom: 10px;
+        }
+        #file-input {
+            display: none;
+        }
+        
+        .result-area {
+            flex: 1.2;
+            min-width: 300px;
+            background: #ffffff;
+            border: 1px solid #c8e6c9;
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.02);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            min-height: 250px;
+        }
+        .result-area h3 {
+            color: #2e7d32;
+            margin-bottom: 15px;
+            font-size: 18px;
+            border-bottom: 2px solid #e8f5e8;
+            padding-bottom: 8px;
+        }
+        .btn-detect {
+            background: linear-gradient(135deg, #4caf50 0%, #388e3c 100%);
+            color: white;
+            border: none;
+            padding: 12px 28px;
+            border-radius: 30px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+            margin-top: 15px;
+            box-shadow: 0 4px 15px rgba(76, 175, 80, 0.3);
+            transition: all 0.3s ease;
+        }
+        .btn-detect:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(76, 175, 80, 0.4);
+        }
+        .btn-detect:disabled {
+            background: #ccc;
+            box-shadow: none;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .result-detail {
+            margin-top: 15px;
+            display: none;
+            animation: fadeIn 0.4s ease-out;
+        }
+        .score-circle-container {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            margin-bottom: 15px;
+        }
+        .score-num {
+            font-size: 42px;
+            font-weight: 800;
+            color: #2e7d32;
+        }
+        .badge {
+            display: inline-block;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 700;
+            color: white;
+        }
+        .badge.fresh { background: #4caf50; }
+        .badge.normal { background: #ff9800; }
+        .badge.bad { background: #f44336; }
+        
+        .reason-box {
+            background: #f1f8e9;
+            border-left: 4px solid #4caf50;
+            padding: 12px 16px;
+            border-radius: 0 8px 8px 0;
+            font-size: 14px;
+            line-height: 1.6;
+            margin-top: 10px;
+        }
+        .reason-box strong {
+            color: #2e7d32;
+            display: block;
+            margin-bottom: 4px;
+        }
+        .source-tag {
+            font-size: 11px;
+            color: #999;
+            text-align: right;
+            margin-top: 10px;
+        }
+        
+        /* Grid references section */
+        .reference-title {
+            color: #2e7d32;
+            margin: 40px 0 20px;
+            text-align: center;
+            font-size: 22px;
+            font-weight: 700;
+        }
+        .img-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 20px;
+            margin-bottom: 40px;
+        }
+        .img-card {
+            background: white;
+            border: 1px solid #e0e0e0;
+            border-radius: 12px;
+            padding: 10px;
+            text-align: center;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.03);
+            transition: transform 0.2s ease;
+        }
+        .img-card:hover {
+            transform: translateY(-3px);
+        }
+        .img-card img {
+            width: 100%;
+            aspect-ratio: 1;
+            object-fit: cover;
+            border-radius: 8px;
+            margin-top: 8px;
+        }
+        .img-card p {
+            font-size: 14px;
+            font-weight: 600;
+            color: #2e7d32;
+        }
+        
+        .box-info {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin-bottom: 40px;
+        }
+        .info-card {
+            background: #fff;
+            padding: 24px;
+            border-radius: 14px;
+            border: 1px solid #c8e6c9;
+            box-shadow: 0 6px 15px rgba(0,0,0,0.02);
+        }
+        .info-card h3 {
+            color: #2e7d32;
+            margin-bottom: 12px;
+            font-size: 18px;
+            font-weight: 700;
+        }
+        .info-card p {
+            line-height: 1.8;
+            color: #444;
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+        .footer-link {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+        .footer-link a {
+            color: #388e3c;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 16px;
+            transition: color 0.2s;
+        }
+        .footer-link a:hover {
+            color: #2e7d32;
+            text-decoration: underline;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        @media(max-width: 768px) {
+            .box-info {
+                grid-template-columns: 1fr;
+            }
+        }
     </style>
 </head>
 <body>
 <div class="wrap">
-    <h2>🍌🍎水果新鲜度判定参考标准样图</h2>
-    <div class="img-box">
-        <div><p>新鲜苹果</p><img src="https://p3-flow-imagex-sign.byteimg.com/tos-cn-i-a9rned3frr/3c29f999f37c4028990d32d3d2f09955~tplv-a9rned3frr-image.image"></div>
-        <div><p>新鲜香蕉</p><img src="https://p3-flow-imagex-sign.byteimg.com/tos-cn-i-a9rned3frr/8d3a2666f23448329966f3d78d469031~tplv-a9rned3frr-image.image"></div>
-        <div><p>新鲜橙子</p><img src="https://p3-flow-imagex-sign.byteimg.com/tos-cn-i-a9rned3frr/021622af2494432882d398380d8d1002~tplv-a9rned3frr-image.image"></div>
-        <div><p>新鲜葡萄</p><img src="https://p3-flow-imagex-sign.byteimg.com/tos-cn-i-a9rned3frr/189a2969f97843959882dd28f071d57e~tplv-a9rned3frr-image.image"></div>
-        <div><p>四果混合实拍</p><img src="https://p3-flow-imagex-sign.byteimg.com/tos-cn-i-a9rned3frr/31c81b81741b41149989d9d77d919178~tplv-a9rned3frr-image.image"></div>
-        <div><p>腐坏劣变果样例</p><img src="https://p3-flow-imagex-sign.byteimg.com/tos-cn-i-a9rned3frr/99229f24347c4838998d79dd3f38396b~tplv-a9rned3frr-image.image"></div>
-    </div>
-    <div class="box">
-        <div class="card">
-            <h3>✅合格新鲜果（轻微小黑点/小瑕疵可食用）</h3>
-            <p>1、香蕉：表皮少量零星小黑点、局部轻微发黄，无软烂、无大面积发黑腐坏 → 判定新鲜可食用</p>
-            <p>2、苹果：表皮细微磕碰小斑点，果肉紧实不软烂 → 新鲜</p>
-            <p>3、橙子：表皮少量干纹，无霉斑软烂 → 新鲜</p>
+    <h2>🍌🍎 水果新鲜度云端智能质检中心</h2>
+    
+    <!-- Cloud VLM detector -->
+    <div class="detector-section">
+        <div class="upload-area">
+            <div class="preview-box" id="drop-zone" onclick="document.getElementById('file-input').click()">
+                <div class="upload-placeholder" id="placeholder-text">
+                    <span style="font-size: 40px; display: block; margin-bottom: 10px;">📤</span>
+                    <span>点击或拖拽上传水果照片</span>
+                    <p style="font-size: 12px; color: #888; margin-top: 5px;">支持 jpg, png 格式图片</p>
+                </div>
+                <img id="image-preview" style="display: none;">
+            </div>
+            <input type="file" id="file-input" accept="image/*">
+            <button class="btn-detect" id="btn-run" disabled>开始云端新鲜度评测</button>
         </div>
-        <div class="card">
-            <h3>❌劣变不可食用果（大面积腐坏）</h3>
-            <p>1、香蕉：超过1/3果皮发黑、果肉软烂流水 → 劣变禁食</p>
-            <p>2、全果霉斑、果肉软烂出水 → 直接判定不新鲜</p>
-            <p>备注：只有局部极细小瑕疵全部判定新鲜，不再轻易判坏果</p>
+        
+        <div class="result-area">
+            <h3>🔬 智能质检报告</h3>
+            <div id="loading" style="display: none; text-align: center; padding: 40px 0;">
+                <p style="color: #666;">🤖 正在连接云端大模型分析中，请稍候...</p>
+            </div>
+            
+            <div id="result-status" style="text-align: center; padding: 40px 0; color: #888; font-style: italic;">
+                暂无分析数据，请先上传水果照片并启动评测
+            </div>
+            
+            <div class="result-detail" id="detail-panel">
+                <div class="score-circle-container">
+                    <span class="score-num" id="score-val">--</span>
+                    <div>
+                        <span id="badge-val" class="badge">--</span>
+                        <div style="margin-top: 5px; font-size: 14px; font-weight: 600; color: #555;" id="edible-val">--</div>
+                    </div>
+                </div>
+                <div class="reason-box">
+                    <strong>💡 AI 质检解析：</strong>
+                    <span id="reason-val">--</span>
+                </div>
+                <div class="source-tag" id="source-val">--</div>
+            </div>
         </div>
     </div>
-    <p style="text-align:center;"><a href="javascript:window.close()">关闭页面返回首页</a></p>
+    
+    <!-- References section -->
+    <h3 class="reference-title">📋 水果新鲜度对比判定标准图谱</h3>
+    <div class="img-grid">
+        <div class="img-card"><p>新鲜苹果</p><img src="https://p3-flow-imagex-sign.byteimg.com/tos-cn-i-a9rned3frr/3c29f999f37c4028990d32d3d2f09955~tplv-a9rned3frr-image.image"></div>
+        <div class="img-card"><p>新鲜香蕉</p><img src="https://p3-flow-imagex-sign.byteimg.com/tos-cn-i-a9rned3frr/8d3a2666f23448329966f3d78d469031~tplv-a9rned3frr-image.image"></div>
+        <div class="img-card"><p>新鲜橙子</p><img src="https://p3-flow-imagex-sign.byteimg.com/tos-cn-i-a9rned3frr/021622af2494432882d398380d8d1002~tplv-a9rned3frr-image.image"></div>
+        <div class="img-card"><p>新鲜葡萄</p><img src="https://p3-flow-imagex-sign.byteimg.com/tos-cn-i-a9rned3frr/189a2969f97843959882dd28f071d57e~tplv-a9rned3frr-image.image"></div>
+        <div class="img-card"><p>四果混合</p><img src="https://p3-flow-imagex-sign.byteimg.com/tos-cn-i-a9rned3frr/31c81b81741b41149989d9d77d919178~tplv-a9rned3frr-image.image"></div>
+        <div class="img-card"><p>腐烂劣变果</p><img src="https://p3-flow-imagex-sign.byteimg.com/tos-cn-i-a9rned3frr/99229f24347c4838998d79dd3f38396b~tplv-a9rned3frr-image.image"></div>
+    </div>
+    
+    <div class="box-info">
+        <div class="info-card">
+            <h3>✅ 合格新鲜果标准（允许轻微局部瑕疵）</h3>
+            <p><strong>1. 香蕉：</strong> 表皮可以有少量零星的褐色小斑点（熟透表现），整体呈现鲜亮黄色，无发黑软烂，果肉坚实 → 判定新鲜可食。</p>
+            <p><strong>2. 苹果：</strong> 果肉硬实，表皮允许有一两处极细小的磕碰斑点，无大面积软烂或发霉 → 判定新鲜。</p>
+            <p><strong>3. 橙子：</strong> 表皮水分饱满，可以有少量枝叶摩擦干纹，无白色/绿色霉斑，果肉无流汁变味 → 判定新鲜。</p>
+        </div>
+        <div class="info-card">
+            <h3>❌ 劣变不可食用果标准</h3>
+            <p><strong>1. 霉变与溃烂：</strong> 任何水果一旦出现霉斑（无论大小）或局部果肉软烂流水、出现发酵异味 → 直接判定为变质不可食用。</p>
+            <p><strong>2. 香蕉：</strong> 果皮发黑面积超过 1/3，且果柄处严重软腐，果肉发黑或呈水渍状 → 劣变禁食。</p>
+            <p><strong>3. 提示：</strong> 切勿只切除坏死部分食用发霉水果，因为毒素霉菌可能已扩散至整果内部。</p>
+        </div>
+    </div>
+    
+    <div class="footer-link">
+        <a href="javascript:window.close()">← 关闭本页面返回系统首页</a>
+    </div>
 </div>
+
+<script>
+const fileInput = document.getElementById("file-input");
+const btnRun = document.getElementById("btn-run");
+const imagePreview = document.getElementById("image-preview");
+const placeholderText = document.getElementById("placeholder-text");
+const dropZone = document.getElementById("drop-zone");
+
+const loading = document.getElementById("loading");
+const resultStatus = document.getElementById("result-status");
+const detailPanel = document.getElementById("detail-panel");
+
+let selectedFile = null;
+
+// 文件选择及预览
+fileInput.onchange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+        handleFileSelect(file);
+    }
+}
+
+function handleFileSelect(file) {
+    selectedFile = file;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+        imagePreview.src = event.target.result;
+        imagePreview.style.display = "block";
+        placeholderText.style.display = "none";
+        btnRun.disabled = false;
+        
+        // 重置识别面板
+        resultStatus.style.display = "block";
+        detailPanel.style.display = "none";
+    }
+    reader.readAsDataURL(file);
+}
+
+// 拖拽上传支持
+dropZone.ondragover = (e) => {
+    e.preventDefault();
+}
+dropZone.ondrop = (e) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    if (file && file.type.startsWith("image/")) {
+        handleFileSelect(file);
+    }
+}
+
+// 发起评测
+btnRun.onclick = async () => {
+    if (!selectedFile) return;
+    
+    // UI状态切换
+    loading.style.display = "block";
+    resultStatus.style.display = "none";
+    detailPanel.style.display = "none";
+    btnRun.disabled = true;
+    
+    const formData = new FormData();
+    formData.append("file", selectedFile);
+    
+    try {
+        const response = await axios.post("/api/fresh", formData, {
+            headers: {
+                "Content-Type": "multipart/form-data"
+            }
+        });
+        
+        const data = response.data;
+        
+        // 渲染数据
+        document.getElementById("score-val").innerText = data.score + "分";
+        
+        const badge = document.getElementById("badge-val");
+        badge.innerText = data.level;
+        badge.className = "badge"; // Reset class list
+        if (data.level === "新鲜") {
+            badge.classList.add("fresh");
+        } else if (data.level === "一般") {
+            badge.classList.add("normal");
+        } else {
+            badge.classList.add("bad");
+        }
+        
+        document.getElementById("edible-val").innerText = data.edible;
+        document.getElementById("reason-val").innerText = data.reason || "无附加分析";
+        
+        const sourceVal = document.getElementById("source-val");
+        if (data.source === "cloud") {
+            sourceVal.innerText = "⚡ 数据来源：云端多模态大模型 AI 实时质检";
+            sourceVal.style.color = "#388e3c";
+        } else {
+            sourceVal.innerText = "🔌 数据来源：本地图像灰度质检算法（未配置云端 Key）";
+            sourceVal.style.color = "#888";
+        }
+        
+        loading.style.display = "none";
+        detailPanel.style.display = "block";
+    } catch (error) {
+        console.error(error);
+        alert("新鲜度评测失败，请检查网络连接及服务状态！");
+        loading.style.display = "none";
+        resultStatus.style.display = "block";
+    } finally {
+        btnRun.disabled = false;
+    }
+}
+</script>
 </body>
 </html>

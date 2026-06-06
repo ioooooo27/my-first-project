@@ -11,6 +11,7 @@ import sqlite3
 import hashlib
 import secrets
 import time
+import base64
 
 
 app = Flask(__name__)
@@ -30,6 +31,109 @@ os.makedirs(hist_img_dir, exist_ok=True)
 def get_password_hash(password, salt_hex):
     salt = bytes.fromhex(salt_hex)
     return hashlib.scrypt(password.encode('utf-8'), salt=salt, n=16384, r=8, p=1).hex()
+
+# 调用云端 VLM API 识别新鲜度
+def get_freshness_from_cloud(image_path):
+    gemini_key = os.environ.get("GEMINI_API_KEY")
+    openai_key = os.environ.get("OPENAI_API_KEY")
+    
+    # 支持从配置文件 config.json 中读取 API Key
+    config_path = os.path.join(BASE_DIR, "config.json")
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+                gemini_key = gemini_key or cfg.get("GEMINI_API_KEY")
+                openai_key = openai_key or cfg.get("OPENAI_API_KEY")
+        except Exception:
+            pass
+
+    if not gemini_key and not openai_key:
+        return None
+
+    try:
+        with open(image_path, "rb") as image_file:
+            img_data = base64.b64encode(image_file.read()).decode("utf-8")
+
+        prompt = (
+            "你是一个水果质检专家。分析图中水果的新鲜度（如有无腐烂、变质、严重破损或大面积黑斑）。"
+            "请严格返回一个 JSON 对象，不得包含任何 markdown 格式或额外文本解释，格式必须如下：\n"
+            "{\"score\": 85, \"level\": \"新鲜\", \"edible\": \"可食用\", \"reason\": \"说明判定原因（中文）\"}\n"
+            "注：score为0-100整数；level只能为'新鲜'、'一般'或'不新鲜'之一；edible只能为'可食用'或'不建议食用'之一。"
+        )
+
+        # 优先使用 OpenAI GPT-4o-mini
+        if openai_key:
+            url = "https://api.openai.com/v1/chat/completions"
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {openai_key}"
+            }
+            payload = {
+                "model": "gpt-4o-mini",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{img_data}"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                "response_format": {"type": "json_object"},
+                "max_tokens": 150
+            }
+            res = requests.post(url, json=payload, headers=headers, timeout=10)
+            if res.status_code == 200:
+                content = res.json()["choices"][0]["message"]["content"]
+                data = json.loads(content.strip())
+                return {
+                    "score": int(data.get("score", 70)),
+                    "level": str(data.get("level", "新鲜")),
+                    "edible": str(data.get("edible", "可食用")),
+                    "reason": str(data.get("reason", "通过 OpenAI 分析"))
+                }
+
+        # 其次使用 Gemini 1.5 Flash
+        if gemini_key:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
+            headers = {"Content-Type": "application/json"}
+            payload = {
+                "contents": [
+                    {
+                        "parts": [
+                            {"text": prompt},
+                            {
+                                "inlineData": {
+                                    "mimeType": "image/jpeg",
+                                    "data": img_data
+                                }
+                            }
+                        ]
+                    }
+                ],
+                "generationConfig": {
+                    "responseMimeType": "application/json"
+                }
+            }
+            res = requests.post(url, json=payload, headers=headers, timeout=10)
+            if res.status_code == 200:
+                content = res.json()['candidates'][0]['content']['parts'][0]['text']
+                data = json.loads(content.strip())
+                return {
+                    "score": int(data.get("score", 70)),
+                    "level": str(data.get("level", "新鲜")),
+                    "edible": str(data.get("edible", "可食用")),
+                    "reason": str(data.get("reason", "通过 Gemini 分析"))
+                }
+    except Exception as e:
+        print(f"调用云端大模型 API 失败: {e}")
+    return None
 
 def init_db():
     db_path = os.path.join(BASE_DIR, "users.db")
@@ -444,6 +548,19 @@ def api_fresh():
     file = request.files['file']
     path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
     file.save(path)
+    
+    # 优先使用云端大模型 VLM API 进行分析
+    cloud_result = get_freshness_from_cloud(path)
+    if cloud_result:
+        return jsonify({
+            "score": cloud_result["score"],
+            "level": cloud_result["level"],
+            "edible": cloud_result["edible"],
+            "reason": cloud_result["reason"],
+            "source": "cloud"
+        })
+        
+    # 如果没有配置云端 API 或调用失败，降级使用本地离线机制
     img = cv2.imread(path)
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     score = int(np.mean(gray))
@@ -455,9 +572,16 @@ def api_fresh():
         level = "一般"
         edible = "可食用"
     else:
+        level = "not_fresh"
         level = "不新鲜"
         edible = "不建议食用"
-    return jsonify({"score":score, "level":level, "edible":edible})
+    return jsonify({
+        "score": score,
+        "level": level,
+        "edible": edible,
+        "reason": "本地离线简易检测（配置 config.json 内的 API Key 可激活云端大模型质检）",
+        "source": "local"
+    })
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0",port=5002,debug=True)

@@ -47,3 +47,6 @@ htmlcov/
 app/hist_img/
 app/temp_img/
 app/uploads/
+
+# 配置文件（包含 API Key 敏感信息）
+app/config.json
