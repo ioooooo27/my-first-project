@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>摄像头实时识别页面</title>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+        body {
+            background: linear-gradient(135deg, #f3faf3 0%, #e8f5e8 100%);
+            min-height: 100vh;
+            color: #333;
+            padding: 30px 20px;
+        }
+        .wrap {
+            width: 100%;
+            max-width: 1200px;
+            margin: 0 auto;
+            text-align: center;
+        }
+        h2 {
+            color: #2e7d32;
+            margin-bottom: 25px;
+            font-size: 28px;
+            font-weight: 700;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        }
+        .btn-box {
+            margin-bottom: 30px;
+        }
+        .btn {
+            background: linear-gradient(135deg, #4caf50 0%, #388e3c 100%);
+            color: white;
+            border: none;
+            padding: 12px 28px;
+            border-radius: 30px;
+            margin: 0 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(76, 175, 80, 0.3);
+            transition: all 0.3s ease;
+        }
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(76, 175, 80, 0.4);
+        }
+        .btn:active {
+            transform: translateY(1px);
+        }
+        .main-container {
+            display: flex;
+            gap: 30px;
+            margin-top: 20px;
+            align-items: flex-start;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        .video-box {
+            flex: 1.6;
+            min-width: 320px;
+            max-width: 720px;
+            background: #ffffff;
+            border: 3px solid #81c784;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            aspect-ratio: 4 / 3;
+            background-color: #eceff1;
+        }
+        #cam {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+        .results-box {
+            flex: 1;
+            min-width: 300px;
+            max-width: 420px;
+            background: rgba(255, 255, 255, 0.9);
+            border: 2px solid #81c784;
+            border-radius: 16px;
+            padding: 24px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+            backdrop-filter: blur(10px);
+            text-align: left;
+        }
+        .results-box h3 {
+            color: #2e7d32;
+            margin-bottom: 20px;
+            font-size: 20px;
+            border-bottom: 2px solid #e8f5e8;
+            padding-bottom: 10px;
+            font-weight: 700;
+        }
+        .placeholder {
+            color: #888;
+            font-style: italic;
+            text-align: center;
+            padding: 40px 0;
+            font-size: 15px;
+        }
+        .result-item {
+            background: linear-gradient(135deg, #f1f8e9 0%, #e8f5e9 100%);
+            border: 1px solid #c8e6c9;
+            border-radius: 12px;
+            padding: 16px 20px;
+            margin-bottom: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.02);
+            animation: slideIn 0.3s ease-out;
+            transition: transform 0.2s ease;
+        }
+        .result-item:hover {
+            transform: scale(1.02);
+        }
+        .fruit-name {
+            font-size: 18px;
+            font-weight: 700;
+            color: #2e7d32;
+        }
+        .fruit-count {
+            font-size: 24px;
+            font-weight: 800;
+            color: #388e3c;
+        }
+        .fruit-count span {
+            font-size: 14px;
+            font-weight: 400;
+            color: #666;
+            margin-left: 4px;
+        }
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body>
+<div class="wrap">
+    <h2>🍎 水果实时摄像头识别（智能分类）</h2>
+    <div class="btn-box">
+        <button class="btn" id="open">开启摄像头</button>
+        <button class="btn" id="close">关闭摄像头</button>
+        <button class="btn" onclick="window.close()" style="background: linear-gradient(135deg, #e53935 0%, #c62828 100%); box-shadow: 0 4px 15px rgba(229, 57, 53, 0.3);">关闭本页面</button>
+    </div>
+    
+    <div class="main-container">
+        <div class="video-box">
+            <img id="cam" src="" alt="请点击“开启摄像头”开启实时画面">
+        </div>
+        <div class="results-box" id="results-panel">
+            <h3>📊 实时检测清单</h3>
+            <div id="results-list">
+                <p class="placeholder">点击“开启摄像头”获取实时结果...</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let pollInterval = null;
+
+document.getElementById("open").onclick = async () => {
+    // 启动摄像头后台流
+    await axios.post("/open_cam");
+    // 设置 img 源以加载 MJPEG 视频流
+    document.getElementById("cam").src = "/video_feed";
+    document.getElementById("results-list").innerHTML = '<p class="placeholder">正在加载识别引擎...</p>';
+    
+    if (pollInterval) clearInterval(pollInterval);
+    
+    // 轮询后台实时识别结果
+    pollInterval = setInterval(async () => {
+        try {
+            let res = await axios.get("/api/cam_results");
+            let data = res.data;
+            let listDiv = document.getElementById("results-list");
+            
+            let keys = Object.keys(data);
+            if (keys.length === 0) {
+                listDiv.innerHTML = '<p class="placeholder">检测中，未发现目标水果...</p>';
+                return;
+            }
+            
+            let htmlContent = "";
+            keys.forEach(key => {
+                let count = data[key];
+                htmlContent += `
+                    <div class="result-item">
+                        <span class="fruit-name">${key}</span>
+                        <span class="fruit-count">${count}<span>个</span></span>
+                    </div>
+                `;
+            });
+            listDiv.innerHTML = htmlContent;
+        } catch (e) {
+            console.error("获取实时结果失败:", e);
+        }
+    }, 500);
+}
+
+document.getElementById("close").onclick = async () => {
+    await axios.post("/close_cam");
+    document.getElementById("cam").src = "";
+    document.getElementById("results-list").innerHTML = '<p class="placeholder">点击“开启摄像头”获取实时结果...</p>';
+    if (pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+    }
+}
+</script>
+</body>
+</html>

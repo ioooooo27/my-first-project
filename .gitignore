@@ -42,3 +42,8 @@ htmlcov/
 
  fruit_images/
  fruit_images_split/
+
+# 临时图片和用户上传文件
+app/hist_img/
+app/temp_img/
+app/uploads/

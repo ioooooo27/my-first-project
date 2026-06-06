@@ -34,7 +34,7 @@ class FruitCNN(torch.nn.Module):
         return x
 
 model = FruitCNN().to(device)
-model.load_state_dict(torch.load("models/fruit_classification_model.pth", map_location=device))
+model.load_state_dict(torch.load("app/models/fruit_classification_model.pth", map_location=device))
 model.eval()
 
 root = tk.Tk()

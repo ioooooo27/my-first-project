@@ -4,10 +4,10 @@ import json
 import numpy as np
 
 # 1. 加载训练完的最优模型
-model = YOLO("models/best_yolo_model.pt")
+model = YOLO("app/models/best_yolo_model.pt")
 
 # 2. 加载科普文档
-with open("fruit_info.json", "r", encoding="utf-8") as f:
+with open("app/fruit_info.json", "r", encoding="utf-8") as f:
     fruit_info = json.load(f)
 
 # 3. 测试图片（根目录test.jpg）
