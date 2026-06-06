@@ -32,6 +32,40 @@ def get_password_hash(password, salt_hex):
     salt = bytes.fromhex(salt_hex)
     return hashlib.scrypt(password.encode('utf-8'), salt=salt, n=16384, r=8, p=1).hex()
 
+# 提取图像物理/色彩/质感特征，辅助无 Vision 模态大模型进行推理判定
+def extract_local_features(image_path):
+    try:
+        img = cv2.imread(image_path)
+        if img is None:
+            return None
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        
+        # 1. 提取色彩平均值
+        mean_h = float(np.mean(hsv[:, :, 0]))
+        mean_s = float(np.mean(hsv[:, :, 1]))
+        mean_v = float(np.mean(hsv[:, :, 2]))
+        
+        # 2. 提取模糊度/表皮质感粗糙度 (Laplacian 梯度方差)
+        blur_val = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+        
+        # 3. 提取暗斑/霉变物理瑕疵像素比率
+        _, thr = cv2.threshold(gray, 60, 255, cv2.THRESH_BINARY_INV)
+        defect_pixels = cv2.countNonZero(thr)
+        total_pixels = gray.shape[0] * gray.shape[1]
+        defect_ratio = (defect_pixels / total_pixels) * 100
+        
+        return {
+            "mean_h": mean_h,
+            "mean_s": mean_s,
+            "mean_v": mean_v,
+            "blur_val": blur_val,
+            "defect_ratio": defect_ratio
+        }
+    except Exception as e:
+        print(f"提取本地 CV 特征失败: {e}")
+    return None
+
 # 调用云端 VLM API 识别新鲜度
 def get_freshness_from_cloud(image_path):
     gemini_key = os.environ.get("GEMINI_API_KEY")
@@ -56,23 +90,72 @@ def get_freshness_from_cloud(image_path):
         return None
 
     try:
-        with open(image_path, "rb") as image_file:
-            img_data = base64.b64encode(image_file.read()).decode("utf-8")
+        model_name = openai_model or "gpt-4o-mini"
+        base_url = openai_base or "https://api.openai.com/v1"
+        base_url = base_url.rstrip("/")
+        
+        # 判定是否使用 Vision 模态
+        # 目前 DeepSeek 官方接口是纯文本模型（不支持 image_url 格式输入）
+        is_vision = True
+        if "deepseek" in base_url or "deepseek" in model_name:
+            is_vision = False
 
-        prompt = (
-            "你是一个水果质检专家。分析图中水果的新鲜度（如有无腐烂、变质、严重破损或大面积黑斑）。"
-            "请严格返回一个 JSON 对象，不得包含任何 markdown 格式或额外文本解释，格式必须如下：\n"
-            "{\"score\": 85, \"level\": \"新鲜\", \"edible\": \"可食用\", \"reason\": \"说明判定原因（中文）\"}\n"
-            "注：score为0-100整数；level只能为'新鲜'、'一般'或'不新鲜'之一；edible只能为'可食用'或'不建议食用'之一。"
-        )
+        if is_vision:
+            with open(image_path, "rb") as image_file:
+                img_data = base64.b64encode(image_file.read()).decode("utf-8")
+                
+            prompt = (
+                "你是一个水果质检专家。分析图中水果的新鲜度（如有无腐烂、变质、严重破损或大面积黑斑）。"
+                "请严格返回一个 JSON 对象，不得包含任何 markdown 格式或额外文本解释，格式必须如下：\n"
+                '{"score": 85, "level": "新鲜", "edible": "可食用", "reason": "说明判定原因（中文）"}\n'
+                "注：score为0-100整数；level只能为'新鲜'、'一般'或'不新鲜'之一；edible只能为'可食用'或'不建议食用'之一。"
+            )
+            content_payload = [
+                {"type": "text", "text": prompt},
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{img_data}"
+                    }
+                }
+            ]
+        else:
+            # 文本大模型模式：运行本地 YOLO 目标分类 + OpenCV 提取形态学特征，交给大模型做物理逻辑判定
+            fruit_name = "未知水果"
+            try:
+                res = model(image_path, conf=0.3)
+                if len(res) > 0 and len(res[0].boxes) > 0:
+                    cls_idx = int(res[0].boxes.cls[0])
+                    fname = res[0].names[cls_idx]
+                    fruit_name = fruit_dict.get(fname, {}).get("name", fname)
+            except Exception:
+                pass
+                
+            features = extract_local_features(image_path)
+            feature_text = ""
+            if features:
+                feature_text = (
+                    f"- 图像物理色调平均值 (HSV-H): {features['mean_h']:.1f}\n"
+                    f"- 图像物理饱和度平均值 (HSV-S): {features['mean_s']:.1f}\n"
+                    f"- 图像物理亮度平均值 (HSV-V): {features['mean_v']:.1f}\n"
+                    f"- 表皮粗糙质感/清晰度值 (Laplacian): {features['blur_val']:.1f}\n"
+                    f"- 局部疑似暗色霉变/黑斑区域占比: {features['defect_ratio']:.2f}%\n"
+                )
+                
+            prompt = (
+                f"你是一个水果质检大语言模型专家。根据我们本地图像识别系统（YOLOv8 + OpenCV）提取的如下物理特征数据，"
+                f"对目标水果【{fruit_name}】的新鲜度级别进行综合评估并输出打分：\n\n"
+                f"{feature_text}\n"
+                f"请结合水果品类的常识（例如：香蕉稍微发黄且少量斑点是完全新鲜的，但如果疑似发黑大面积霉变则不新鲜；橙子表皮允许有摩擦干纹，但有霉斑就代表腐坏），"
+                f"严格返回一个 JSON 对象，不得包含任何 markdown 格式或额外文本解释，格式必须如下：\n"
+                '{"score": 85, "level": "新鲜", "edible": "可食用", "reason": "说明判定原因（基于上述HSV色彩参数及表皮缺陷占比等特征，进行专业的中文评估）"}\n'
+                f"注：score为0-100整数；level只能为'新鲜'、'一般'或'不新鲜'之一；edible只能为'可食用'或'不建议食用'之一。"
+            )
+            content_payload = prompt
 
-        # 优先使用 OpenAI 兼容接口（如 DeepSeek、OpenRouter 等）
+        # 优先使用 OpenAI 兼容接口
         if openai_key:
-            base_url = openai_base or "https://api.openai.com/v1"
-            base_url = base_url.rstrip("/")
             url = f"{base_url}/chat/completions"
-            model_name = openai_model or "gpt-4o-mini"
-            
             headers = {
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {openai_key}"
@@ -82,19 +165,11 @@ def get_freshness_from_cloud(image_path):
                 "messages": [
                     {
                         "role": "user",
-                        "content": [
-                            {"type": "text", "text": prompt},
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/jpeg;base64,{img_data}"
-                                }
-                            }
-                        ]
+                        "content": content_payload
                     }
                 ],
                 "response_format": {"type": "json_object"},
-                "max_tokens": 150
+                "max_tokens": 200
             }
             res = requests.post(url, json=payload, headers=headers, timeout=15)
             if res.status_code == 200:
@@ -111,13 +186,22 @@ def get_freshness_from_cloud(image_path):
 
         # 其次使用 Gemini 1.5 Flash
         if gemini_key:
+            with open(image_path, "rb") as image_file:
+                img_data = base64.b64encode(image_file.read()).decode("utf-8")
             url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
             headers = {"Content-Type": "application/json"}
+            
+            prompt_vis = (
+                "你是一个水果质检专家。分析图中水果的新鲜度（如有无腐烂、变质、严重破损或大面积黑斑）。"
+                "请严格返回一个 JSON 对象，不得包含任何 markdown 格式或额外文本解释，格式必须如下：\n"
+                "{\"score\": 85, \"level\": \"新鲜\", \"edible\": \"可食用\", \"reason\": \"说明判定原因（中文）\"}\n"
+                "注：score为0-100整数；level只能为'新鲜'、'一般'或'不新鲜'之一；edible只能为'可食用' or '不建议食用'之一。"
+            )
             payload = {
                 "contents": [
                     {
                         "parts": [
-                            {"text": prompt},
+                            {"text": prompt_vis},
                             {
                                 "inlineData": {
                                     "mimeType": "image/jpeg",
