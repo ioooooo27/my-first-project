@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>水果识别</title>
+</head>
+<body>
+<input type="file" id="file">
+<button onclick="detect()">识别</button>
+<div id="result"></div>
+<div id="info"></div>
+<script>
+function detect(){
+let form=new FormData()
+form.append('file',document.getElementById('file').files[0])
+fetch('/api/detect',{method:'POST',body:form}).then(r=>r.json()).then(d=>{
+document.getElementById('result').innerText='水果：'+d.name
+document.getElementById('info').innerText=JSON.stringify(d.info)
+})
+}
+</script>
+</body>
+</html>

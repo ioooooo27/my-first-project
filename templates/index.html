@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>基于计算机视觉的水果智能识别系统</title>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <style>
+        *{margin:0;padding:0;box-sizing:border-box;font-family:"微软雅黑";}
+        body{background:#f6fbf6;padding:12px;}
+        .container{max-width:1620px;margin:0 auto;}
+        .top-head{text-align:center;background:#fff;padding:16px;border-radius:10px;margin-bottom:15px;position:relative;}
+        .top-head h1{color:#297d3e;font-size:29px;}
+        .sub-title{color:#666;margin-top:5px;}
+        .grid-wrap{display:grid;grid-template-columns:63% 35%;gap:2%;}
+        .card{background:#ffffff;border:1px solid #d7eed9;border-radius:10px;padding:18px;margin-bottom:16px;}
+        h3{color:#297d3e;margin-bottom:10px;}
+        .green-btn{background:#39b54a;color:#fff;border:none;padding:9px 18px;border-radius:22px;font-size:15px;cursor:pointer;margin:0 6px;}
+        input{padding:6px 8px;border:1px solid #cccccc;border-radius:5px;margin:4px 6px;}
+        table{width:100%;border-collapse:collapse;margin:8px 0;}
+        th,td{border:1px solid #d7eed9;padding:7px;text-align:center;}
+        th{background:#e7f9e9;color:#297d3e;}
+        .tag{display:inline-block;background:#e7f9e9;color:#297d3e;padding:4px 11px;border-radius:16px;margin:3px;}
+        .demo-row{display:flex;justify-content:space-around;margin-top:10px;}
+        #res-img{max-height:270px;max-width:95%;display:block;margin:0 auto;}
+        .ok{color:#297d3e;}
+        .err{color:#d62828;}
+        .red-text{color:#c82423;font-weight:bold;}
+        .btn-group{margin:8px 0;}
+        .detail-text{margin-top:12px;white-space:pre-line;line-height:1.7;}
+        .hist-wrap{display:flex;gap:15px;margin-top:10px;}
+        .hist-wrap img{height:180px;border:1px solid #ccc;}
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="top-head">
+        <h1>基于计算机视觉的水果智能识别系统</h1>
+        <div class="sub-title">智能识别 · 新鲜度检测 · 水果科普 · 价格预估</div>
+    </div>
+    <div class="grid-wrap">
+        <div class="left-col">
+            <div class="card">
+                <h3>📊 常见水果营养对比</h3>
+                <table>
+                    <tr><th>水果</th><th>热量(kcal/100g)</th><th>维C(mg/100g)</th><th>膳食纤维(g/100g)</th></tr>
+                    <tr><td>苹果</td><td>52</td><td>4</td><td>2.4</td></tr>
+                    <tr><td>香蕉</td><td>89</td><td>10</td><td>2.6</td></tr>
+                    <tr><td>橙子</td><td>47</td><td>53</td><td>2.4</td></tr>
+                    <tr><td>葡萄</td><td>69</td><td>10</td><td>1.6</td></tr>
+                </table>
+            </div>
+
+            <div class="card">
+                <h3>📸 图片识别</h3>
+                <div class="btn-group">
+                    <button class="green-btn" id="shotBtn">拍照识别</button>
+                    <button class="green-btn" onclick="document.getElementById('file').click()">上传水果图片</button>
+                    <button class="green-btn" id="continueBtn">继续识别</button>
+                    <input type="file" id="file" accept="image/*" hidden>
+                </div>
+                <p style="color:#777;font-size:13px;">支持jpg/png/jpeg格式，建议上传清晰水果照片，点击继续识别可重复上传不用刷新</p>
+            </div>
+
+            <div class="card">
+                <h3>🔍识别结果（红框圈选单个水果）</h3>
+                <img id="res-img">
+                <div class="hist-wrap">
+                    <div>
+                        <p>劣变区域掩码图</p>
+                        <img id="mask-img">
+                    </div>
+                    <div>
+                        <p>灰度直方图数据图</p>
+                        <img id="hist-img">
+                    </div>
+                </div>
+                <div id="info-text" style="white-space:pre-line;margin-top:10px;line-height:1.6;"></div>
+                <div class="detail-text" id="know_text">暂无科普信息，识别水果后自动加载详细介绍</div>
+            </div>
+
+            <div class="card">
+                <h3>💰视觉计价｜单价&手动修正重量&自动核算</h3>
+                <div>
+                    <span>苹果单价：</span><input type="number" step="0.01" id="p_apple">
+                    <span>香蕉单价：</span><input type="number" step="0.01" id="p_banana">
+                    <span>橙子单价：</span><input type="number" step="0.01" id="p_orange">
+                    <span>葡萄单价：</span><input type="number" step="0.01" id="p_grape">
+                    <br>
+                    <span>识别水果：</span><input placeholder="自动填充" id="fruitName">
+                    <span>系统预估斤数：</span><input placeholder="可手动修改重量" id="editWeight">
+                    <button class="green-btn" onclick="getAiPrice()">AI一键查实时市场价</button>
+                    <div id="ai_tip" style="color:#228b22;margin:6px 0;"></div>
+                    <button class="green-btn" onclick="calcTotal()">一键计算总价</button>
+                    <div id="total_show" class="red-text"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="right-col">
+            <div class="card">
+                <h3>📖系统介绍</h3>
+                <p style="line-height:1.7;">本系统基于深度学习计算机视觉技术，可智能识别多种常见水果，自动检测新鲜度、分析表皮劣变程度、智能估算单果重量与采购总价，同时收录各类水果产地、营养、食用方式与保鲜储存等专业科普信息。</p>
+            </div>
+            <div class="card">
+                <h3>🍓支持水果种类</h3>
+                <div>
+                    <span class="tag">苹果</span>
+                    <span class="tag">香蕉</span>
+                    <span class="tag">橙子</span>
+                    <span class="tag">葡萄</span>
+                </div>
+            </div>
+            <div class="card">
+                <h3>💡使用提示</h3>
+                <ol style="padding-left:20px;line-height:1.7;">
+                    <li>上传照片尽量光线充足</li>
+                    <li>水果主体居中无遮挡</li>
+                    <li>推荐使用实拍原图</li>
+                </ol>
+                <div class="demo-row">
+                    <div style="text-align:center;">
+                        <div style="font-size:45px;">🍎</div>
+                        <p class="ok">✅正面、清晰、无遮挡</p>
+                    </div>
+                    <div style="text-align:center;">
+                        <div style="font-size:45px;">🍌</div>
+                        <p class="err">❌模糊、被遮挡、多水果混放</p>
+                    </div>
+                </div>
+            </div>
+            <div class="card">
+                <h3>☀️今日推荐当季水果</h3>
+                <div style="text-align:center;">
+                    <div style="font-size:42px;">🍊</div>
+                    <p>橙子(秋冬当季)</p>
+                    <p style="font-size:14px;color:#555;">富含维生素和矿物质，水分充足，清甜多汁</p>
+                </div>
+            </div>
+            <div class="card">
+                <h3>🥬新鲜度判定结果 <a href="/fresh_page" target="_blank">【点击查看好坏果参考样图】</a></h3>
+                <p id="fresh_text">等待识别</p>
+            </div>
+            <div class="card">
+                <h3>📜识别历史记录</h3>
+                <div id="history_box" style="font-size:14px;line-height:1.6;">
+                    {% for item in history %}
+                    <p>{{item.time}} | {{item.data}} | {{item.fresh}}</p>
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="card">
+                <h3>📦全品类水果储存小贴士汇总</h3>
+                <ul style="padding-left:20px;line-height:1.7;">
+                    <li>苹果：常温7~10天，0~4℃冷藏可存放30天</li>
+                    <li>香蕉：阴凉常温存放，成熟3日内吃完，不可冷藏</li>
+                    <li>橙子：阴凉5天，冷藏可延长至15天保鲜</li>
+                    <li>葡萄：带果梗0~5℃冷藏，保鲜3~7天</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let initPrice = {{init_price|tojson}};
+document.getElementById("p_apple").value = initPrice.apple;
+document.getElementById("p_banana").value = initPrice.banana;
+document.getElementById("p_orange").value = initPrice.orange;
+document.getElementById("p_grape").value = initPrice.grape;
+
+let cacheCount = {};
+let nowFruitKey = "";
+//拍照
+document.getElementById("shotBtn").onclick = ()=>{
+    window.open('/camera_page','_blank');
+}
+//继续识别：清空内容、重新选择文件
+document.getElementById("continueBtn").onclick = ()=>{
+    document.getElementById("file").value = "";
+    document.getElementById("res-img").src = "";
+    document.getElementById("mask-img").src = "";
+    document.getElementById("hist-img").src = "";
+    document.getElementById("info-text").innerText = "";
+    document.getElementById("know_text").innerText = "暂无科普信息，识别水果后自动加载详细介绍";
+    document.getElementById("fresh_text").innerText = "等待识别";
+    document.getElementById("fruitName").value = "";
+    document.getElementById("editWeight").value = "";
+    document.getElementById("total_show").innerText = "";
+}
+//上传识别
+document.getElementById("file").onchange = async (e)=>{
+    let fd = new FormData();
+    fd.append("img",e.target.files[0]);
+    let res = await axios.post("/detect",fd);
+    let d = res.data;
+    document.getElementById("res-img").src = d.img_url;
+    document.getElementById("mask-img").src = d.mask_url;
+    document.getElementById("hist-img").src = d.hist_url;
+    document.getElementById("info-text").innerText = d.info;
+    document.getElementById("fresh_text").innerText = d.fresh;
+    cacheCount = d.count;
+    let firstKey = Object.keys(cacheCount)[0];
+    nowFruitKey = firstKey;
+    document.getElementById("fruitName").value = firstKey;
+    document.getElementById("editWeight").value = cacheCount[firstKey].weight;
+    let detailHtml = "";
+    if(firstKey == "banana"){
+        detailHtml = `【香蕉详细科普】
+一、产地分布：我国主产区集中在海南、广东、广西、云南四大热带省份，华南两广全年均可种植，海南香蕉果型饱满、果肉绵密，是国内主流供货产地。
+二、营养功效：富含钾元素、碳水化合物、膳食纤维、维生素B6，钾元素能够调节体内电解质平衡，缓解身体疲劳、舒缓肌肉酸痛；果胶可促进肠道蠕动，改善便秘；低升糖碳水适合加餐补充能量。
+三、最佳食用时节：全年均可成熟上市，夏季6~9月自然熟香蕉口感最优，自然成熟果香浓郁、甜度自然，反季多为催熟果，风味偏弱。
+四、多样吃法：直接生食是最常见吃法；切片搭配燕麦、酸奶制作营养奶昔；烘焙可做香蕉蛋糕、玛芬点心；搭配米饭做成水果饭团。
+五、储存方法：不可冷藏，低温会造成果皮发黑、果肉变质，放置阴凉避光室温环境，成熟后3天内吃完最佳。`;
+    }else if(firstKey == "apple"){
+        detailHtml = `【苹果详细科普】
+一、产地分布：山东烟台、陕西洛川、甘肃静宁、山西运城为国内四大优质苹果产区，北方温带气候昼夜温差大，果实糖分积累充足。
+二、营养功效：富含果胶、多酚、维生素C与抗氧化物质，果胶保护肠胃黏膜，饭前食用增强饱腹感，多酚抗氧化延缓肌肤老化。
+三、最佳食用时节：9~11月秋季当季鲜果，秋苹果脆甜多汁，耐储存，冷藏可保鲜1个月以上。
+四、多样吃法：生吃、蒸苹果养胃、榨鲜果汁、苹果派烘焙、炖煮水果汤。
+五、储存方法：常温阴凉7~10天，0~4℃冰箱冷藏可延长至30天保鲜。`;
+    }else if(firstKey == "orange"){
+        detailHtml = `【橙子详细科普】
+一、产地分布：江西赣南、重庆奉节、四川眉山、湖南麻阳是国内知名脐橙产区，亚热带湿润气候造就高汁水橙子。
+二、营养功效：超高维C含量，抗氧化、增强免疫力，柠檬酸促进胃液分泌帮助消化，膳食纤维帮助代谢油脂。
+三、最佳食用时节：秋冬10~次年2月上市，冬季橙子汁水最充沛。
+四、多样吃法：鲜食剥皮直接吃、鲜榨橙汁、做水果沙拉、炖雪梨橙子糖水。
+五、储存方法：阴凉通风存放5天左右，密封冷藏可保鲜15天。`;
+    }else if(firstKey == "grape"){
+        detailHtml = `【葡萄详细科普】
+一、产地分布：新疆吐鲁番、河北宣化、山东平度、云南蒙自为核心产区，吐鲁番昼夜温差大，葡萄糖分极高。
+二、营养功效：花青素、葡萄糖、多种矿物质，花青素护眼抗氧化，葡萄糖快速补充体力。
+三、最佳食用时节：7~9月夏秋成熟。
+四、多样吃法：鲜食、自制葡萄酒、葡萄果冻、搭配芝士摆盘。
+五、储存方法：保留果梗，0~5℃冷藏3~7天，不可水洗后存放。`;
+    }
+    document.getElementById("know_text").innerText = detailHtml;
+}
+//询价
+async function getAiPrice(){
+    let name = document.getElementById("fruitName").value;
+    let res = await axios.post("/get_ai_price",{fruit:name});
+    let msg = res.data.price;
+    document.getElementById("ai_tip").innerText = msg;
+    if(res.data.status=="ok"){
+        if(name == "apple") document.getElementById("p_apple").value = parseFloat(msg);
+        if(name == "banana") document.getElementById("p_banana").value = parseFloat(msg);
+        if(name == "orange") document.getElementById("p_orange").value = parseFloat(msg);
+        if(name == "grape") document.getElementById("p_grape").value = parseFloat(msg);
+    }
+}
+//计价
+function calcTotal(){
+    if(Object.keys(cacheCount).length ===0){
+        document.getElementById("total_show").innerText="请先识别图片！";
+        return;
+    }
+    let priceMap = {
+        apple:Number(document.getElementById("p_apple").value),
+        banana:Number(document.getElementById("p_banana").value),
+        orange:Number(document.getElementById("p_orange").value),
+        grape:Number(document.getElementById("p_grape").value)
+    }
+    let allTotal = 0;
+    let detailStr = "";
+    for(let key in cacheCount){
+        let num = cacheCount[key].num;
+        let w;
+        if(key === nowFruitKey && document.getElementById("editWeight").value!=""){
+            w = Number(document.getElementById("editWeight").value);
+        }else{
+            w = cacheCount[key].weight;
+        }
+        let p = priceMap[key];
+        let single = w*p;
+        allTotal += single;
+        detailStr += `${key}:${num}个,${w}斤,单价${p}元,小计${single.toFixed(2)}元；`
+    }
+    document.getElementById("total_show").innerText = detailStr+" 合计总价："+allTotal.toFixed(2)+"元";
+}
+</script>
+</body>
+</html>

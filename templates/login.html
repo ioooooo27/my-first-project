@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>登录</title>
+<style>
+body{background:url(/static/bg.jpg);background-size:cover;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}
+.login{background:white;padding:40px;border-radius:16px;text-align:center}
+input,button{margin:10px 0;padding:10px;width:220px;font-family:黑体}
+</style>
+</head>
+<body>
+<div class="login">
+<h2>水果智能识别系统</h2>
+<input id="user" placeholder="用户名"><br>
+<input id="pwd" type="password" placeholder="密码"><br>
+<button onclick="login()">登录</button>
+</div>
+<script>
+function login(){
+let form=new FormData()
+form.append('username',document.getElementById('user').value)
+form.append('password',document.getElementById('pwd').value)
+fetch('/api/login',{method:'POST',body:form}).then(r=>r.json()).then(d=>{
+if(d.code===0)location.href='/index'
+})
+}
+</script>
+</body>
+</html>

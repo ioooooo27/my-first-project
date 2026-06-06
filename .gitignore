@@ -1,47 +1,44 @@
-# Python 虚拟环境
+# 虚拟环境
 .venv/
+env/
 venv/
 ENV/
-env/
 
-# Python 编译文件
+# Python编译文件
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-*.egg-info/
-.installed.cfg
-*.egg
+*.pyc
+*.pyo
+*.pyd
 
-# 编辑器 / IDE
-.idea/
+# 环境变量文件
+.env
+.env.local
+.env.*.local
+
+# 日志文件
+*.log
+logs/
+
+# 数据库文件
+*.db
+*.sqlite
+
+# 编辑器配置
 .vscode/
+.idea/
 *.swp
 *.swo
 *~
 
-# 操作系统
+# 操作系统文件
 .DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
 Thumbs.db
 
-# 日志 / 临时文件
-*.log
-*.tmp
-*.temp
+# 测试和覆盖率报告
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+
+ fruit_images/
+ fruit_images_split/

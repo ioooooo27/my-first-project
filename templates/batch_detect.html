@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>批量统计</title>
+</head>
+<body>
+<input type="file" id="file">
+<button onclick="batch()">批量识别</button>
+<div id="count"></div>
+<script>
+function batch(){
+let form=new FormData()
+form.append('file',document.getElementById('file').files[0])
+fetch('/api/batch',{method:'POST',body:form}).then(r=>r.json()).then(d=>{
+document.getElementById('count').innerText=JSON.stringify(d)
+})
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+flask
+ultralytics
+torch
+torchvision
+opencv-python
+pillow
+matplotlib
+beautifulsoup4
+requests
+pyyaml
