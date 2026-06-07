@@ -375,14 +375,18 @@ def check_freshness(crop_bgr, save_name):
 # 摄像头流
 def camera_work():
     global global_frame, cam_cap, cam_thread_flag, global_cam_results
+    
+    # 【优化1】设置摄像头分辨率（降低处理负担）
     cam_cap = cv2.VideoCapture(0)
+    cam_cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cam_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    cam_cap.set(cv2.CAP_PROP_FPS, 15)  # 限制摄像头采集帧率
     
     is_mock = False
     mock_frame = None
     if not cam_cap.isOpened():
         is_mock = True
         print("警告: 无法打开物理摄像头，开启模拟摄像头识别模式...")
-        # 寻找可用的模拟图片
         mock_img_path = None
         for candidate in ["合果1.png", "香蕉1.png", "苹果1.png", "葡萄1.png"]:
             p = os.path.join(temp_img_dir, candidate)
@@ -398,13 +402,21 @@ def camera_work():
                     
         if mock_img_path and os.path.exists(mock_img_path):
             mock_frame = cv2.imread(mock_img_path)
+            # 调整模拟图片尺寸
+            mock_frame = cv2.resize(mock_frame, (640, 480))
         else:
             mock_frame = np.zeros((480, 640, 3), dtype=np.uint8)
             cv2.putText(mock_frame, "No camera or mock image found", (50, 240), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
             
-    # 帧过滤机制：跳帧以极大降低CPU开销，保持流画面流畅，无累积延迟
+    # 【优化】推理间隔和帧计数
     frame_count = 0
     latest_res = None
+    inference_interval = 4  # 每4帧推理一次（约3.75FPS推理）
+    
+    # 【关键优化】先读取几帧预热摄像头，避免启动时黑屏
+    if not is_mock:
+        for _ in range(3):
+            cam_cap.read()
     
     while cam_thread_flag and (is_mock or cam_cap.isOpened()):
         if not is_mock:
@@ -412,15 +424,16 @@ def camera_work():
             if not ret:
                 break
         else:
-            time.sleep(0.1)  # 10 FPS
+            time.sleep(0.05)  # 约20 FPS
             frame = mock_frame.copy()
             now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
             cv2.putText(frame, f"Mock Camera | {now_str}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
             
         frame_count += 1
-        # 每隔 3 帧做一次 YOLO 推理 (约 10 FPS)，其余帧复用上一帧的检测框
-        if latest_res is None or frame_count % 3 == 0:
-            latest_res = model(frame, conf=0.42)[0]
+        
+        # YOLO推理
+        if latest_res is None or frame_count % inference_interval == 0:
+            latest_res = model(frame, conf=0.45)[0]
             
         draw_img = frame.copy()
         current_counts = {}
@@ -431,24 +444,26 @@ def camera_work():
                 cls_idx = int(box.cls[0])
                 fname = latest_res.names[cls_idx]
                 
-                # 统计数量
                 chinese_name = fruit_dict.get(fname, {}).get("name", fname)
                 current_counts[chinese_name] = current_counts.get(chinese_name, 0) + 1
                 
-                # 画红色矩形框
                 cv2.rectangle(draw_img,(x1,y1),(x2,y2),(0,0,255),2)
-                # 在图像上绘制英文类别和置信度标签
                 conf_val = float(box.conf[0])
-                label = f"{fname.capitalize()} {conf_val:.2f}"
-                cv2.putText(draw_img, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+                label = f"{fname.capitalize()} {conf_val:.1f}"
+                cv2.putText(draw_img, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
             
+        # 更新共享变量
         with frame_lock:
             global_frame = draw_img
         with cam_results_lock:
             global_cam_results = current_counts
 
-    if cam_cap and cam_cap.isOpened():
-        cam_cap.release()
+    if cam_cap:
+        try:
+            if cam_cap.isOpened():
+                cam_cap.release()
+        except:
+            pass
     cam_thread_flag = False
     with frame_lock:
         global_frame = None
@@ -457,18 +472,39 @@ def camera_work():
 
 def gen_stream():
     global global_frame, cam_thread_flag, active_connections
+    
+    start_camera_thread()
+    
     with active_connections_lock:
         active_connections += 1
+    
+    # 【关键优化】等待摄像头第一帧就绪，避免黑屏
+    wait_count = 0
+    max_wait = 50  # 最多等待约2.5秒
+    while wait_count < max_wait:
+        with frame_lock:
+            if global_frame is not None:
+                break
+        wait_count += 1
+        time.sleep(0.05)
+    
     try:
         while True:
-            time.sleep(0.03)  # 控制帧率(约30fps)并防止CPU 100%空转及锁饥饿
+            time.sleep(0.033)  # 约30FPS输出，更流畅
+            
             if not cam_thread_flag:
                 break
+            
+            # 直接获取帧，不使用loading_frame
             with frame_lock:
                 if global_frame is None:
                     continue
-                _, buf = cv2.imencode(".jpg", global_frame)
-            yield b'--frame\r\nContent-Type:image/jpeg\r\n\r\n'+buf.tobytes()+b'\r\n'
+                current_frame = global_frame
+            
+            # 【优化】高质量JPEG编码
+            _, buf = cv2.imencode(".jpg", current_frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+            
+            yield b'--frame\r\nContent-Type:image/jpeg\r\n\r\n' + buf.tobytes() + b'\r\n'
     except GeneratorExit:
         pass
     finally:
@@ -578,6 +614,7 @@ def close_cam():
 
 @app.route("/video_feed")
 def video_feed():
+    # 确保摄像头线程已启动
     start_camera_thread()
     return Response(gen_stream(), mimetype="multipart/x-mixed-replace; boundary=frame")
 
