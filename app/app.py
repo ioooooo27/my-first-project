@@ -210,6 +210,20 @@ cam_results_lock = threading.Lock()
 active_connections = 0
 active_connections_lock = threading.Lock()
 
+camera_thread = None
+camera_thread_lock = threading.Lock()
+
+def start_camera_thread():
+    global cam_thread_flag, camera_thread
+    with camera_thread_lock:
+        if camera_thread is not None and camera_thread.is_alive() and not cam_thread_flag:
+            camera_thread.join(timeout=1.0)
+            
+        if camera_thread is None or not camera_thread.is_alive():
+            cam_thread_flag = True
+            camera_thread = threading.Thread(target=camera_work, daemon=True)
+            camera_thread.start()
+
 # 【重点修复】橙子/香蕉色域修正，优化新鲜度，正常新鲜橙子不再误判劣变
 def check_freshness(crop_bgr, save_name):
     try:
@@ -241,14 +255,45 @@ def camera_work():
     global global_frame, cam_cap, cam_thread_flag, global_cam_results
     cam_cap = cv2.VideoCapture(0)
     
+    is_mock = False
+    mock_frame = None
+    if not cam_cap.isOpened():
+        is_mock = True
+        print("警告: 无法打开物理摄像头，开启模拟摄像头识别模式...")
+        # 寻找可用的模拟图片
+        mock_img_path = None
+        for candidate in ["合果1.png", "香蕉1.png", "苹果1.png", "葡萄1.png"]:
+            p = os.path.join(temp_img_dir, candidate)
+            if os.path.exists(p):
+                mock_img_path = p
+                break
+        
+        if not mock_img_path and os.path.exists(temp_img_dir):
+            for f in os.listdir(temp_img_dir):
+                if f.endswith(('.png', '.jpg', '.jpeg')) and not f.startswith('out_'):
+                    mock_img_path = os.path.join(temp_img_dir, f)
+                    break
+                    
+        if mock_img_path and os.path.exists(mock_img_path):
+            mock_frame = cv2.imread(mock_img_path)
+        else:
+            mock_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+            cv2.putText(mock_frame, "No camera or mock image found", (50, 240), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+            
     # 帧过滤机制：跳帧以极大降低CPU开销，保持流画面流畅，无累积延迟
     frame_count = 0
     latest_res = None
     
-    while cam_thread_flag and cam_cap.isOpened():
-        ret, frame = cam_cap.read()
-        if not ret:
-            break
+    while cam_thread_flag and (is_mock or cam_cap.isOpened()):
+        if not is_mock:
+            ret, frame = cam_cap.read()
+            if not ret:
+                break
+        else:
+            time.sleep(0.1)  # 10 FPS
+            frame = mock_frame.copy()
+            now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            cv2.putText(frame, f"Mock Camera | {now_str}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
             
         frame_count += 1
         # 每隔 3 帧做一次 YOLO 推理 (约 10 FPS)，其余帧复用上一帧的检测框
@@ -280,7 +325,7 @@ def camera_work():
         with cam_results_lock:
             global_cam_results = current_counts
 
-    if cam_cap:
+    if cam_cap and cam_cap.isOpened():
         cam_cap.release()
     cam_thread_flag = False
     with frame_lock:
@@ -399,11 +444,7 @@ def camera_page():
 
 @app.route("/open_cam",methods=["POST"])
 def open_cam():
-    global cam_thread_flag
-    if not cam_thread_flag:
-        cam_thread_flag = True
-        t = threading.Thread(target=camera_work, daemon=True)
-        t.start()
+    start_camera_thread()
     return jsonify({"code":1})
 
 @app.route("/close_cam",methods=["POST"])
@@ -415,6 +456,7 @@ def close_cam():
 
 @app.route("/video_feed")
 def video_feed():
+    start_camera_thread()
     return Response(gen_stream(), mimetype="multipart/x-mixed-replace; boundary=frame")
 
 @app.route("/api/cam_results")
@@ -462,9 +504,11 @@ def detect():
             count_map[fname]["weight"] += weight
 
     info_text = ""
+    fruit_key = ""
     for k in count_map:
         info = fruit_dict[k]
         info_text += f"【{info['name']}】数量:{count_map[k]['num']}个 预估重量:{count_map[k]['weight']}斤\n"
+        fruit_key = k
     out_name = f"out_{raw_name}"
     cv2.imwrite(os.path.join(temp_img_dir, out_name), draw_img)
 
@@ -483,7 +527,7 @@ def detect():
         "info":info_text,
         "fresh":fresh_msg,
         "count":count_map,
-        "fruit_key":k,
+        "fruit_key":fruit_key,
         "mask_url":f"/hist_img/{raw_name}_mask.jpg",
         "hist_url":f"/hist_img/{raw_name}_hist.jpg"
     })
