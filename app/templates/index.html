@@ -379,8 +379,21 @@
             let firstKey = Object.keys(cacheCount)[0];
             if (firstKey) {
                 nowFruitKey = firstKey;
-                document.getElementById("fruitName").value = firstKey;
                 document.getElementById("editWeight").value = cacheCount[firstKey].weight;
+                
+                // 显示多水果识别结果
+                let fruitNames = Object.keys(cacheCount).join("、");
+                document.getElementById("fruitName").value = fruitNames;
+                
+                // 如果后端返回了多水果价格估算，更新对应水果的单价
+                if (d.price) {
+                    for (let fruitKey in d.price) {
+                        let priceInput = document.getElementById("p_" + fruitKey);
+                        if (priceInput && d.price[fruitKey] && d.price[fruitKey].price_per_jin) {
+                            priceInput.value = d.price[fruitKey].price_per_jin;
+                        }
+                    }
+                }
                 let detailHtml = "";
                 if (firstKey == "banana") {
                     detailHtml = `【香蕉详细科普】

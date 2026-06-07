@@ -154,6 +154,129 @@ def get_freshness_from_cloud(image_path):
         print(f"调用云端大模型 API 失败: {e}")
     return None
 
+# 调用云端 VLM API 进行智能价格估算（结合图片分析）
+def get_price_from_cloud(image_path, fruit_name, freshness_level="新鲜"):
+    gemini_key = os.environ.get("GEMINI_API_KEY")
+    openai_key = os.environ.get("OPENAI_API_KEY")
+    openai_base = os.environ.get("OPENAI_API_BASE")
+    openai_model = os.environ.get("OPENAI_MODEL")
+    
+    # 支持从配置文件 config.json 中读取 API Key
+    config_path = os.path.join(BASE_DIR, "config.json")
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+                gemini_key = gemini_key or cfg.get("GEMINI_API_KEY")
+                openai_key = openai_key or cfg.get("OPENAI_API_KEY")
+                openai_base = openai_base or cfg.get("OPENAI_API_BASE")
+                openai_model = openai_model or cfg.get("OPENAI_MODEL")
+        except Exception:
+            pass
+
+    if not gemini_key and not openai_key:
+        return None
+
+    try:
+        with open(image_path, "rb") as image_file:
+            img_data = base64.b64encode(image_file.read()).decode("utf-8")
+
+        prompt = (
+            f"你是一个水果价格评估专家。根据图片分析{fruit_name}的市场零售价格。\n"
+            f"已知新鲜度等级：{freshness_level}\n"
+            "请分析图片中水果的：\n"
+            "1. 大小和数量\n"
+            "2. 外观品质（色泽、完整性）\n"
+            "3. 根据以上因素估算合理的市场零售价格（单位：元/斤）\n"
+            "请严格返回一个 JSON 对象，格式如下：\n"
+            '{"price_per_jin": 8.5, "reason": "说明定价依据（中文）", "confidence": 90}\n'
+            "注：price_per_jin为0-50之间的浮点数；confidence为0-100整数表示置信度。"
+        )
+
+        # 优先使用 OpenAI 兼容接口
+        if openai_key:
+            base_url = openai_base or "https://api.openai.com/v1"
+            base_url = base_url.rstrip("/")
+            url = f"{base_url}/chat/completions"
+            model_name = openai_model or "gpt-4o-mini"
+            
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {openai_key}"
+            }
+            payload = {
+                "model": model_name,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{img_data}"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                "max_tokens": 300
+            }
+            res = requests.post(url, json=payload, headers=headers, timeout=15)
+            if res.status_code == 200:
+                content = res.json()["choices"][0]["message"]["content"]
+                content_clean = content.strip()
+                if content_clean.startswith("```"):
+                    first_nl = content_clean.find("\n")
+                    if first_nl != -1:
+                        content_clean = content_clean[first_nl:].strip()
+                    if content_clean.endswith("```"):
+                        content_clean = content_clean[:-3].strip()
+                
+                data = json.loads(content_clean)
+                return {
+                    "price_per_jin": float(data.get("price_per_jin", 5.0)),
+                    "reason": str(data.get("reason", f"通过 {model_name} 分析")),
+                    "confidence": int(data.get("confidence", 80))
+                }
+            else:
+                print(f"OpenAI 兼容接口报错 (HTTP {res.status_code}): {res.text}")
+
+        # 其次使用 Gemini 1.5 Flash
+        if gemini_key:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
+            headers = {"Content-Type": "application/json"}
+            payload = {
+                "contents": [
+                    {
+                        "parts": [
+                            {"text": prompt},
+                            {
+                                "inlineData": {
+                                    "mimeType": "image/jpeg",
+                                    "data": img_data
+                                }
+                            }
+                        ]
+                    }
+                ],
+                "generationConfig": {
+                    "responseMimeType": "application/json"
+                }
+            }
+            res = requests.post(url, json=payload, headers=headers, timeout=15)
+            if res.status_code == 200:
+                content = res.json()['candidates'][0]['content']['parts'][0]['text']
+                data = json.loads(content.strip())
+                return {
+                    "price_per_jin": float(data.get("price_per_jin", 5.0)),
+                    "reason": str(data.get("reason", "通过 Gemini 分析")),
+                    "confidence": int(data.get("confidence", 80))
+                }
+    except Exception as e:
+        print(f"调用云端大模型进行价格估算失败: {e}")
+    return None
+
 def init_db():
     db_path = os.path.join(BASE_DIR, "users.db")
     conn = sqlite3.connect(db_path)
@@ -202,7 +325,6 @@ global_frame = None
 frame_lock = threading.Lock()
 cam_cap = None
 cam_thread_flag = False
-history_list = []
 
 # 摄像头实时结果共享与连接数管理
 global_cam_results = {}
@@ -428,7 +550,7 @@ def index():
             elif item == "banana": price_data[item] = 2.2
             elif item == "orange": price_data[item] = 4.6
             else: price_data[item] = 7.6
-    return render_template("index.html", history=history_list, init_price=price_data, user=session['user'])
+    return render_template("index.html", init_price=price_data, user=session['user'])
 
 @app.route("/fresh_page")
 def fresh_page():
@@ -486,7 +608,17 @@ def detect():
     draw_img = img.copy()
     count_map = {}
     fresh_msg = ""
-    pixel_per_jin = 72000
+    
+    # 【优化】基于水果种类的重量估算（参考常见水果的平均重量）
+    # 重量单位：斤 (500克)
+    fruit_weight_map = {
+        "apple": 0.35,    # 苹果约3.5两/个
+        "banana": 0.2,    # 香蕉约2两/个
+        "orange": 0.3,    # 橙子约3两/个
+        "grape": 1.5,     # 葡萄约1.5斤/串
+        "strawberry": 0.03, # 草莓约3钱/个
+        "pear": 0.4       # 梨约4两/个
+    }
 
     for box in res.boxes:
         x1,y1,x2,y2 = map(int,box.xyxy[0])
@@ -495,13 +627,14 @@ def detect():
         cv2.rectangle(draw_img,(x1,y1),(x2,y2),(0,0,255),2)
         crop = img[y1:y2,x1:x2]
         fresh_msg = check_freshness(crop, raw_name)
-        area = (x2-x1)*(y2-y1)
-        weight = round(area/pixel_per_jin,2)
+        
+        # 使用基于水果种类的平均重量估算
+        avg_weight = fruit_weight_map.get(fname, 0.3)  # 默认3两
         if fname not in count_map:
-            count_map[fname] = {"num":1,"weight":weight}
+            count_map[fname] = {"num":1,"weight":round(avg_weight,2)}
         else:
             count_map[fname]["num"] +=1
-            count_map[fname]["weight"] += weight
+            count_map[fname]["weight"] = round(count_map[fname]["weight"] + avg_weight, 2)
 
     info_text = ""
     fruit_key = ""
@@ -512,15 +645,32 @@ def detect():
     out_name = f"out_{raw_name}"
     cv2.imwrite(os.path.join(temp_img_dir, out_name), draw_img)
 
-    # 写入历史
-    now_time = datetime.datetime.now().strftime("%m-%d %H:%M")
-    history_list.append({
-        "time":now_time,
-        "data":count_map,
-        "fresh":fresh_msg
-    })
-    if len(history_list)>12:
-        history_list.pop(0)
+    # 【新增】调用大模型进行智能价格估算
+    price_result = None
+    if fruit_key:
+        fruit_info = fruit_dict.get(fruit_key, {})
+        fruit_chinese_name = fruit_info.get("name", fruit_key)
+        price_result = get_price_from_cloud(save_path, fruit_chinese_name, fresh_msg)
+    
+    # 构建价格信息
+    price_info = {}
+    if price_result:
+        price_info = {
+            "price_per_jin": price_result["price_per_jin"],
+            "reason": price_result["reason"],
+            "confidence": price_result["confidence"],
+            "source": "cloud"
+        }
+    else:
+        # 降级使用新发地价格
+        market_price = get_realtime_fruit_price(fruit_key)
+        if market_price:
+            price_info = {
+                "price_per_jin": market_price,
+                "reason": "使用新发地批发市场参考价",
+                "confidence": 70,
+                "source": "market"
+            }
 
     return jsonify({
         "img_url":f"/temp/{out_name}",
@@ -529,7 +679,8 @@ def detect():
         "count":count_map,
         "fruit_key":fruit_key,
         "mask_url":f"/hist_img/{raw_name}_mask.jpg",
-        "hist_url":f"/hist_img/{raw_name}_hist.jpg"
+        "hist_url":f"/hist_img/{raw_name}_hist.jpg",
+        "price": price_info
     })
 
 @app.route("/temp/<name>")
